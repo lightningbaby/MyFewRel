@@ -26,7 +26,8 @@ class FewShotREModel(nn.Module):
         You need to set self.cost as your own loss function.
         '''
         nn.Module.__init__(self)
-        self.sentence_encoder = nn.DataParallel(sentence_encoder)
+        # self.sentence_encoder = nn.DataParallel(sentence_encoder)
+        self.sentence_encoder = sentence_encoder
         self.cost = nn.CrossEntropyLoss()
     
     def forward(self, support, query, N, K, Q):
@@ -209,8 +210,8 @@ class FewShotREFramework:
                     label = label.cuda()
 
                 logits, pred  = model(support, query, 
-                        N_for_train, K, Q * N_for_train + na_rate * Q)
-            loss = model.loss(logits, label) / float(grad_iter)
+                        N_for_train, K, Q * N_for_train + na_rate * Q)#调用模型的forward
+            loss = model.loss(logits, label) / float(grad_iter)#为什么要除以gra_iter
             right = model.accuracy(pred, label)
             if fp16:
                 with amp.scale_loss(loss, optimizer) as scaled_loss:
@@ -308,7 +309,7 @@ class FewShotREFramework:
         print("")
         
         model.eval()
-        if ckpt is None:
+        if ckpt is None:#如果没有ckpt那就是validation，如果有就是test
             eval_dataset = self.val_data_loader
         else:
             state_dict = self.__load_model__(ckpt)['state_dict']

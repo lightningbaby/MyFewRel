@@ -1,7 +1,21 @@
+#!/usr/bin/env python
+# -*- encoding: utf-8 -*-
+'''
+@File    :   train_smry.py    
+@Contact :   lightningtyb@163.com
+@License :   (C)Copyright 2019-2020
+
+@Modify Time      @Author    @Version    @Desciption
+------------      -------    --------    -----------
+2019-12-17 19:35   tangyubao      1.0         None
+'''
+
+# import lib
 import os
-from fewshot_re_kit.data_loader import get_loader, get_loader_pair, get_loader_unsupervised
+
+from fewshot_re_kit.data_loader import get_loader, get_loader_pair, get_loader_unsupervised,get_loader_with_summary
 from fewshot_re_kit.framework import FewShotREFramework
-from fewshot_re_kit.sentence_encoder import CNNSentenceEncoder, BERTSentenceEncoder, BERTPAIRSentenceEncoder
+from fewshot_re_kit.sentence_encoder import CNNSentenceEncoder, BERTSentenceEncoder, BERTPAIRSentenceEncoder,CNNSentenceEncoderWithSummary
 import models
 from models.proto import Proto
 from models.gnn import GNN
@@ -17,64 +31,67 @@ import numpy as np
 import json
 import argparse
 
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--train', default='train_wiki',
-            help='train file')
+                        help='train file')
     parser.add_argument('--val', default='val_wiki',
-            help='val file')
+                        help='val file')
     parser.add_argument('--test', default='test_wiki',
-            help='test file')
+                        help='test file')
     parser.add_argument('--adv', default=None,
-            help='adv file')
+                        help='adv file')
     parser.add_argument('--trainN', default=5, type=int,
-            help='N in train')
+                        help='N in train')
     parser.add_argument('--N', default=5, type=int,
-            help='N way')
+                        help='N way')
     parser.add_argument('--K', default=5, type=int,
-            help='K shot')
+                        help='K shot')
     parser.add_argument('--Q', default=5, type=int,
-            help='Num of query per class')
+                        help='Num of query per class')
     parser.add_argument('--batch_size', default=4, type=int,
-            help='batch size')
+                        help='batch size')
     parser.add_argument('--train_iter', default=30000, type=int,
-            help='num of iters in training')
+                        help='num of iters in training')
     parser.add_argument('--val_iter', default=1000, type=int,
-            help='num of iters in validation')
+                        help='num of iters in validation')
     parser.add_argument('--test_iter', default=10000, type=int,
-            help='num of iters in testing')
+                        help='num of iters in testing')
     parser.add_argument('--val_step', default=3000, type=int,
-           help='val after training how many iters')
+                        help='val after training how many iters')
     parser.add_argument('--model', default='proto',
-            help='model name')
+                        help='model name')
     parser.add_argument('--encoder', default='cnn',
-            help='encoder: cnn or bert')
+                        help='encoder: cnn or bert or cnn_smry')
     parser.add_argument('--max_length', default=128, type=int,
-           help='max length')
+                        help='max length')
     parser.add_argument('--lr', default=1e-1, type=float,
-           help='learning rate')
+                        help='learning rate')
     parser.add_argument('--weight_decay', default=1e-5, type=float,
-           help='weight decay')
+                        help='weight decay')
     parser.add_argument('--dropout', default=0.0, type=float,
-           help='dropout rate')
+                        help='dropout rate')
     parser.add_argument('--na_rate', default=0, type=int,
-           help='NA rate (NA = Q * na_rate)')
+                        help='NA rate (NA = Q * na_rate)')
     parser.add_argument('--grad_iter', default=1, type=int,
-           help='accumulate gradient every x iterations')
+                        help='accumulate gradient every x iterations')
     parser.add_argument('--optim', default='sgd',
-           help='sgd / adam / bert_adam')
+                        help='sgd / adam / bert_adam')
     parser.add_argument('--hidden_size', default=230, type=int,
-           help='hidden size')
+                        help='hidden size')
     parser.add_argument('--load_ckpt', default=None,
-           help='load ckpt')
+                        help='load ckpt')
     parser.add_argument('--save_ckpt', default=None,
-           help='save ckpt')
-    parser.add_argument('--fp16',action='store_true',
-           help='use nvidia apex fp16')
+                        help='save ckpt')
+    parser.add_argument('--fp16', action='store_true',
+                        help='use nvidia apex fp16')
     parser.add_argument('--only_test', action='store_true',
-           help='only test')
+                        help='only test')
     parser.add_argument('--pair', action='store_true',
-           help='use pair model')
+                        help='use pair model')
+    parser.add_argument('--loader',default='smry',
+                        help='loader:comm or pair or smry')
 
     opt = parser.parse_args()
     trainN = opt.trainN
@@ -85,12 +102,13 @@ def main():
     model_name = opt.model
     encoder_name = opt.encoder
     max_length = opt.max_length
-    
+    loader=opt.loader
+
     print("{}-way-{}-shot Few-Shot Relation Classification".format(N, K))
     print("model: {}".format(model_name))
     print("encoder: {}".format(encoder_name))
     print("max_length: {}".format(max_length))
-    
+
     if encoder_name == 'cnn':
         try:
             glove_mat = np.load('./pretrain/glove/glove_mat.npy')
@@ -98,39 +116,62 @@ def main():
         except:
             raise Exception("Cannot find glove files. Run glove/download_glove.sh to download glove files.")
         sentence_encoder = CNNSentenceEncoder(
-                glove_mat,
-                glove_word2id,
-                max_length)
+            glove_mat,
+            glove_word2id,
+            max_length)
     elif encoder_name == 'bert':
         if opt.pair:
             sentence_encoder = BERTPAIRSentenceEncoder(
-                    './pretrain/bert-base-uncased',
-                    max_length)
+                './pretrain/bert-base-uncased',
+                max_length)
         else:
             sentence_encoder = BERTSentenceEncoder(
-                    './pretrain/bert-base-uncased',
-                    max_length)
+                './pretrain/bert-base-uncased',
+                max_length)
+    elif encoder_name == 'cnn_smry':
+        try:
+            glove_mat = np.load('./pretrain/glove/glove_mat.npy')
+            glove_word2id = json.load(open('./pretrain/glove/glove_word2id.json'))
+        except:
+            raise Exception("Cannot find glove files. Run glove/download_glove.sh to download glove files.")
+        sentence_encoder = CNNSentenceEncoderWithSummary(
+            glove_mat,
+            glove_word2id,
+            max_length)
+
     else:
         raise NotImplementedError
-    
-    if opt.pair:
+
+    if loader == opt.pair:
         train_data_loader = get_loader_pair(opt.train, sentence_encoder,
-                N=trainN, K=K, Q=Q, na_rate=opt.na_rate, batch_size=batch_size)
+                                            N=trainN, K=K, Q=Q, na_rate=opt.na_rate, batch_size=batch_size)
         val_data_loader = get_loader_pair(opt.val, sentence_encoder,
-                N=N, K=K, Q=Q, na_rate=opt.na_rate, batch_size=batch_size)
+                                          N=N, K=K, Q=Q, na_rate=opt.na_rate, batch_size=batch_size)
         test_data_loader = get_loader_pair(opt.test, sentence_encoder,
-                N=N, K=K, Q=Q, na_rate=opt.na_rate, batch_size=batch_size)
-    else:
+                                           N=N, K=K, Q=Q, na_rate=opt.na_rate, batch_size=batch_size)
+    elif loader == 'comm':
         train_data_loader = get_loader(opt.train, sentence_encoder,
-                N=trainN, K=K, Q=Q, na_rate=opt.na_rate, batch_size=batch_size)
+                                       N=trainN, K=K, Q=Q, na_rate=opt.na_rate, batch_size=batch_size)
         val_data_loader = get_loader(opt.val, sentence_encoder,
-                N=N, K=K, Q=Q, na_rate=opt.na_rate, batch_size=batch_size)
+                                     N=N, K=K, Q=Q, na_rate=opt.na_rate, batch_size=batch_size)
         test_data_loader = get_loader(opt.test, sentence_encoder,
-                N=N, K=K, Q=Q, na_rate=opt.na_rate, batch_size=batch_size)
+                                      N=N, K=K, Q=Q, na_rate=opt.na_rate, batch_size=batch_size)
         if opt.adv:
-           adv_data_loader = get_loader_unsupervised(opt.adv, sentence_encoder,
-                N=trainN, K=K, Q=Q, na_rate=opt.na_rate, batch_size=batch_size)
-   
+            adv_data_loader = get_loader_unsupervised(opt.adv, sentence_encoder,
+                                                      N=trainN, K=K, Q=Q, na_rate=opt.na_rate, batch_size=batch_size)
+    else:
+        train_data_loader = get_loader_with_summary(opt.train, sentence_encoder,
+                                       N=trainN, K=K, Q=Q, na_rate=opt.na_rate, batch_size=batch_size)
+        val_data_loader = get_loader_with_summary(opt.val, sentence_encoder,
+                                     N=N, K=K, Q=Q, na_rate=opt.na_rate, batch_size=batch_size)
+        test_data_loader = get_loader_with_summary(opt.test, sentence_encoder,
+                                      N=N, K=K, Q=Q, na_rate=opt.na_rate, batch_size=batch_size)
+        if opt.adv:
+            adv_data_loader = get_loader_unsupervised(opt.adv, sentence_encoder,
+                                                      N=trainN, K=K, Q=Q, na_rate=opt.na_rate, batch_size=batch_size)
+
+
+
     if opt.optim == 'sgd':
         pytorch_optim = optim.SGD
     elif opt.optim == 'adam':
@@ -142,16 +183,17 @@ def main():
         raise NotImplementedError
     if opt.adv:
         d = Discriminator(opt.hidden_size)
-        framework = FewShotREFramework(train_data_loader, val_data_loader, test_data_loader, adv_data_loader, adv=opt.adv, d=d)
+        framework = FewShotREFramework(train_data_loader, val_data_loader, test_data_loader, adv_data_loader,
+                                       adv=opt.adv, d=d)
     else:
         framework = FewShotREFramework(train_data_loader, val_data_loader, test_data_loader)
-        
+
     prefix = '-'.join([model_name, encoder_name, opt.train, opt.val, str(N), str(K)])
     if opt.adv is not None:
         prefix += '-adv_' + opt.adv
     if opt.na_rate != 0:
         prefix += '-na{}'.format(opt.na_rate)
-    
+
     if model_name == 'proto':
         model = Proto(sentence_encoder, hidden_size=opt.hidden_size)
     elif model_name == 'gnn':
@@ -167,7 +209,7 @@ def main():
         model = Pair(sentence_encoder, hidden_size=opt.hidden_size)
     else:
         raise NotImplementedError
-    
+
     if not os.path.exists('checkpoint'):
         os.mkdir('checkpoint')
     ckpt = 'checkpoint/{}.pth.tar'.format(prefix)
@@ -184,14 +226,17 @@ def main():
             bert_optim = False
 
         framework.train(model, prefix, batch_size, trainN, N, K, Q,
-                pytorch_optim=pytorch_optim, load_ckpt=opt.load_ckpt, save_ckpt=ckpt,
-                na_rate=opt.na_rate, val_step=opt.val_step, fp16=opt.fp16, pair=opt.pair, 
-                train_iter=opt.train_iter, val_iter=opt.val_iter, bert_optim=bert_optim)
+                        pytorch_optim=pytorch_optim, load_ckpt=opt.load_ckpt, save_ckpt=ckpt,
+                        na_rate=opt.na_rate, val_step=opt.val_step, fp16=opt.fp16, pair=opt.pair,
+                        train_iter=opt.train_iter, val_iter=opt.val_iter, bert_optim=bert_optim)
     else:
         ckpt = opt.load_ckpt
 
     acc = framework.eval(model, batch_size, N, K, Q, opt.test_iter, na_rate=opt.na_rate, ckpt=ckpt, pair=opt.pair)
     print("RESULT: %.2f" % (acc * 100))
 
+
 if __name__ == "__main__":
     main()
+
+

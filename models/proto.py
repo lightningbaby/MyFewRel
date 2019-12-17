@@ -28,13 +28,13 @@ class Proto(fewshot_re_kit.framework.FewShotREModel):
         K: Num of instances for each class in the support set
         Q: Num of instances in the query set
         '''
-        # support emb size[200,230], query emb [200,230]
+        # support emb size[100,230], query emb [100,230] sentence-encoder将support从128编码为230，这里调用sentence encoder的forward函数
         support_emb = self.sentence_encoder(support) # (B * N * K, D), where D is the hidden size
         query_emb = self.sentence_encoder(query) # (B * total_Q, D)
         support = self.drop(support_emb)
         query = self.drop(query_emb)
-        support = support.view(-1, N, K, self.hidden_size) # (B, N, K, D) [4,10,5,230] 4大组，每大组里10小组，每小组里5行，每行230列
-        query = query.view(-1, total_Q, self.hidden_size) # (B, total_Q, D) [4,50,230]
+        support = support.view(-1, N, K, self.hidden_size) # (B, N, K, D) [4,5,5,230] 4大组，每大组里10小组，每小组里5行，每行230列
+        query = query.view(-1, total_Q, self.hidden_size) # (B, total_Q, D) [4,25,230]
 
         B = support.size(0) # Batch size
          

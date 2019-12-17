@@ -25,10 +25,10 @@ class CNNSentenceEncoder(nn.Module):
 
     def forward(self, inputs):
         x = self.embedding(inputs)
-        x = self.encoder(x)
+        x = self.encoder(x)#    [100,230]
         return x
 
-    def tokenize(self, raw_tokens, pos_head, pos_tail):
+    def tokenize(self, raw_tokens, pos_head, pos_tail):#data_loader.py里的__getraw__会调用
         # token -> index
         indexed_tokens = []
         for token in raw_tokens:
@@ -124,6 +124,7 @@ class BERTPAIRSentenceEncoder(nn.Module):
 
     def forward(self, inputs):
         x = self.bert(inputs['word'], token_type_ids=inputs['seg'], attention_mask=inputs['mask'])[0]
+        # print(type(x))
         return x
     
     def tokenize(self, raw_tokens, pos_head, pos_tail):
@@ -170,18 +171,16 @@ class BERTPAIRSentenceEncoder(nn.Module):
         return indexed_tokens # , pos1, pos2, mask
 
 
-class CNNSentenceEncoder_With_Summary(nn.Module):
+class CNNSentenceEncoderWithSummary(nn.Module):
 
     def __init__(self, word_vec_mat, word2id, max_length, word_embedding_dim=50,
                  pos_embedding_dim=5, hidden_size=230):
         nn.Module.__init__(self)
         self.hidden_size = hidden_size
         self.max_length = max_length
-        # self.embedding = network.embedding.Embedding(word_vec_mat, max_length,
-        #         word_embedding_dim, pos_embedding_dim)
-        self.embedding = network.tot_emb.cat_embedding(word_vec_mat, max_length,
-                                                       word_embedding_dim, pos_embedding_dim)
-        self.encoder = network.encoder.Encoder(max_length, word_embedding_dim,
+        self.embedding = network.embedding.EmbeddingWithSummary(word_vec_mat, max_length,
+                word_embedding_dim, pos_embedding_dim)#output [100,128,50*3+5*2=160]
+        self.encoder = network.encoder.EncoderWithSummary(max_length, word_embedding_dim,
                                                pos_embedding_dim, hidden_size)
         self.word2id = word2id
 
@@ -190,20 +189,48 @@ class CNNSentenceEncoder_With_Summary(nn.Module):
         x = self.encoder(x)
         return x
 
-    def tokenize(self, raw_tokens, pos_head, pos_tail):
-        # token -> index
+    def token2idx(self,tokens):
         indexed_tokens = []
-        for token in raw_tokens:
+        for token in tokens:
             token = token.lower()
             if token in self.word2id:
                 indexed_tokens.append(self.word2id[token])  # word2id 是glove_word2id，已经有的文件
             else:
                 indexed_tokens.append(self.word2id['[UNK]'])
 
-        # padding
+        return indexed_tokens
+
+    def padding(self,indexed_tokens):
         while len(indexed_tokens) < self.max_length:
             indexed_tokens.append(self.word2id['[PAD]'])
         indexed_tokens = indexed_tokens[:self.max_length]
+
+        return indexed_tokens
+
+    def tokenize(self, raw_tokens, pos_head, pos_tail,smry1,smry2):
+        # token -> index
+        # indexed_tokens = []
+        # for token in raw_tokens:
+        #     token = token.lower()
+        #     if token in self.word2id:
+        #         indexed_tokens.append(self.word2id[token])  # word2id 是glove_word2id，已经有的文件
+        #     else:
+        #         indexed_tokens.append(self.word2id['[UNK]'])
+
+        # token -> index
+        indexed_tokens = self.token2idx(raw_tokens)
+
+        # smry -> index
+        indexed_smry1 = self.token2idx(smry1)
+        indexed_smry2 = self.token2idx(smry2)
+
+        # padding
+        # while len(indexed_tokens) < self.max_length:
+        #     indexed_tokens.append(self.word2id['[PAD]'])
+        # indexed_tokens = indexed_tokens[:self.max_length]
+        indexed_tokens = self.padding(indexed_tokens)
+        indexed_smry1 = self.padding(indexed_smry1)
+        indexed_smry2 = self.padding(indexed_smry2)
 
         # pos
         pos1 = np.zeros((self.max_length), dtype=np.int32)
@@ -218,4 +245,4 @@ class CNNSentenceEncoder_With_Summary(nn.Module):
         mask = np.zeros((self.max_length), dtype=np.int32)
         mask[:len(indexed_tokens)] = 1  # 起始到indexed_tokens的位置都为1,有词的地方就是1
 
-        return indexed_tokens, pos1, pos2, mask
+        return indexed_tokens, pos1, pos2, mask, indexed_smry1, indexed_smry2
